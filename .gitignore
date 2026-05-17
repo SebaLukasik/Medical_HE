@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.benchmarks/
+.ipynb_checkpoints/
+
+# Klucze HE i ciphertexty — NIGDY do repo!
+*.tenseal
+*.ckks
+*.ct
+keys/
+src/bench/results/*
+!src/bench/results/.gitkeep
+notebooks/.ipynb_checkpoints/
+
+# Dane medyczne (nawet jeśli syntetyczne, dla nawyku)
+data/synthea_raw/
+data/processed/
+!data/synthea_raw/.gitkeep
+!data/processed/.gitkeep
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
