@@ -1,54 +1,46 @@
-# Poufna analiza danych medycznych w szyfrowaniu homomorficznym
+# medical-he-stats — poufna agregacja statystyk medycznych (homomorphic encryption)
 
-> Projekt z kryptografii, temat 4. System, w którym szpital zleca zewnętrznemu
-> serwerowi obliczenie wskaźników statystycznych (średnia, wariancja, odchylenie
-> standardowe, mediana z histogramu) na danych pacjentów — **bez ujawniania
-> wartości**. Wykorzystujemy schemat **CKKS** (TenSEAL) i porównujemy poprawność
-> oraz czas obliczeń względem wersji jawnej (NumPy).
+**Outsourcing obliczeń statystycznych na niezaufany serwer bez ujawniania wartości pomiarów.**  
+Klient (szpital) szyfruje kolumny danych schematem **CKKS** (biblioteka **TenSEAL**), przesyła szyfrogramy przez **REST API** (**FastAPI**); serwer wykonuje obliczenia na zaszyfrowanych wektorach i zwraca wynik nadal zaszyfrowany — odszyfrowanie tylko po stronie posiadacza klucza prywatnego.
+
+---
+
+## W skrócie
+
+| | |
+|---|---|
+| **Stos** | Python 3.11–3.12, TenSEAL (CKKS), FastAPI, NumPy / pandas, httpx, pytest |
+| **Co robi system** | Statystyki na zaszyfrowanych seriach: suma, średnia, wariancja, histogram (zliczenia bucketów), korelacja Pearsona (komponenty HE → wartość końcowa po stronie klienta); mediana **przybliżona** przez histogram (świadomy kompromis kosztu HE — opisany w `docs/theory.md`). |
+| **Jakość** | Testy automatyczne: zgodność HE vs „oracle” NumPy, scenariusze HTTP end-to-end (`tests/`). |
+| **Wydajność** | Skrypty `src/bench/*` — czas szyfrowania / ewaluacji / plaintext, wykresy opcjonalnie w `src/bench/results/` (generowane lokalnie). |
+| **Kod vs notebooki** | Logika jest w **`src/`** i **`tests/`**. Katalog **`notebooks/`** jest opcjonalny — patrz [`notebooks/README.md`](notebooks/README.md). |
 
 ---
 
 ## Spis treści
 
-1. [Co tu robimy i dlaczego](#co-tu-robimy-i-dlaczego)
-2. [Architektura w jednym obrazku](#architektura)
+1. [Problem i podejście](#problem-i-podejście)
+2. [Architektura](#architektura)
 3. [Instalacja](#instalacja)
-4. [Szybki start (demo end-to-end)](#szybki-start)
-5. [Struktura repo](#struktura-repo)
-6. [Co dalej w nauce](#co-dalej-w-nauce)
-7. [Podział pracy w grupie](#podział-pracy-w-grupie)
+4. [Szybki start](#szybki-start)
+5. [Struktura repozytorium](#struktura-repozytorium)
+6. [Dokumentacja](#dokumentacja)
 
 ---
 
-## Co tu robimy i dlaczego
+## Problem i podejście
 
-**Problem.** Szpital ma dane pacjentów (ciśnienie, glukoza, BMI…) i chce, żeby
-zewnętrzna firma policzyła statystyki populacyjne. Ale dane są wrażliwe (RODO,
-art. 9) — nie można ich wysłać w postaci jawnej.
+Dane medyczne podlegają szczególnej ochronie (np. RODO art. 9). Klasyczne szyfrowanie symetryczne (AES) wymaga odszyfrowania przed obliczeniami — **serwer zobaczyłby plaintext**.
 
-**Tradycyjne podejście — szyfrowanie AES.** Serwer musi odszyfrować, żeby
-policzyć → traci się sens outsourcingu.
-
-**Nasze podejście — szyfrowanie homomorficzne (HE).** Serwer liczy
-**bezpośrednio na szyfrogramach**. Otrzymuje wynik zaszyfrowany, odsyła go do
-szpitala. Tylko szpital (posiadacz klucza prywatnego) może go odszyfrować.
+**Szyfrowanie homomorficzne (HE)** pozwala wykonywać wybrane operacje arytmetyczne **bezpośrednio na szyfrogramach**. W tym repozytorium używamy **CKKS** (przybliżone liczby rzeczywiste), co nadaje się do średniej, wariancji, sum kwadratów itd.
 
 ```text
-plaintext:    [120, 135, 128, ...]   ── mean ──►   127.6
-ciphertext:   [c1,  c2,  c3,  ...]   ── mean ──►   c_mean   ──► dec ──► 127.6
-                                                              (na kliencie)
+plaintext:    [120, 135, 128, …]   ── mean ──►  127.6
+ciphertext:   [c1,  c2,  c3,  …]   ── mean ──►  c_mean  ──► dec ──► 127.6
+                                                            (tylko klient)
 ```
 
-Czyli operacja arytmetyczna „przechodzi przez szyfrowanie":
-
-$$
-\text{Dec}\big(\text{Enc}(a) + \text{Enc}(b)\big) = a + b
-\qquad
-\text{Dec}\big(\text{Enc}(a) \cdot \text{Enc}(b)\big) = a \cdot b
-$$
-
-Szczegóły teoretyczne (BFV / BGV / **CKKS** / TFHE, noise budget, batching,
-bootstrapping): zob. [`docs/theory.md`](docs/theory.md).
+Formalnie: homomorfizm pozwala uzyskać złożone statystyki jako wyrażenia na zaszyfrowanych danych; szczegóły i ograniczenia (noise budget, mediana) → [`docs/theory.md`](docs/theory.md).
 
 ---
 
@@ -56,239 +48,148 @@ bootstrapping): zob. [`docs/theory.md`](docs/theory.md).
 
 ```text
 ┌──────────────────────────┐                       ┌──────────────────────────┐
-│  SZPITAL / LEKARZ        │                       │  SERWER OBLICZENIOWY     │
-│  (klient zaufany)        │                       │  (niezaufany)            │
+│  Klient (zaufany)        │                       │  Serwer (niezaufany)     │
 ├──────────────────────────┤                       ├──────────────────────────┤
-│ 1. Wczytaj dane          │                       │                          │
-│ 2. Wygeneruj klucze CKKS │  public + eval keys   │                          │
-│ 3. Zaszyfruj kolumny     │ ────────────────────► │ przechowuje tylko klucze │
-│                          │                       │ publiczne                │
-│                          │  ciphertexty          │                          │
-│                          │ ────────────────────► │ 4. Oblicz w HE:          │
-│                          │                       │    sum, mean, var, std,  │
-│                          │                       │    histogram, mediana    │
-│                          │  zaszyfrowany wynik   │                          │
-│                          │ ◄──────────────────── │                          │
-│ 5. Odszyfruj             │                       │                          │
-│ 6. Porównaj z plaintext  │                       │                          │
+│  Dane, klucz prywatny    │  kontekst BEZ        │  Tylko klucze publiczne  │
+│  szyfrowanie CKKS        │  secret_key          │  + eval (Galois, relin)  │
+│  upload ciphertextów    │ ───────────────────► │  obliczenia na HE        │
+│  odszyfrowanie wyników   │ ◄────────────────── │  brak dostępu do wartości│
 └──────────────────────────┘                       └──────────────────────────┘
 ```
 
-Pełny opis: [`docs/architecture.md`](docs/architecture.md).
-Model zagrożeń (co serwer wie/nie wie): [`docs/threat_model.md`](docs/threat_model.md).
+Szczegóły API i przepływu: [`docs/architecture.md`](docs/architecture.md).  
+Co atakujący może i czego nie może wywnioskować: [`docs/threat_model.md`](docs/threat_model.md).
 
 ---
 
 ## Instalacja
 
-Wymagane: **Python 3.11 lub 3.12** (patrz `requires-python` w `pyproject.toml`;
-TenSEAL ≥0.3.16 ma wheels dla obu).
-Używamy [uv](https://docs.astral.sh/uv/) jako menedżera pakietów (szybsze niż pip,
-jeden plik konfiguracji `pyproject.toml`, lockfile).
+**Python 3.11 lub 3.12**, menedżer **[uv](https://docs.astral.sh/uv/)** (lockfile `uv.lock`, `pyproject.toml`).
 
 ```powershell
-# Przejdź do projektu
 cd C:\Users\Lenovo\projects\medical-he-stats
 
-# Jednorazowo: zainstaluj uv jeśli nie masz
 winget install --id astral-sh.uv
-
-# Stwórz .venv w folderze i zainstaluj wszystko z pyproject.toml
 uv sync
 ```
 
-To wystarczy. `uv sync` zrobi:
-1. Wykryje, że potrzebny jest Python 3.11 (i pobierze go, jeśli trzeba).
-2. Utworzy `.venv/` w folderze projektu.
-3. Zainstaluje zależności z `pyproject.toml` + grupę `dev`.
-4. Zapisze dokładne wersje w `uv.lock`.
-
-### Jak dodać/usunąć bibliotekę
+Weryfikacja:
 
 ```powershell
-uv add scikit-learn               # nowa zależność
-uv add --dev mypy                  # tylko do developmentu
-uv remove scipy                    # usuń
-uv sync                            # po edycji pyproject.toml ręcznie
+uv run python -c "import tenseal as ts; print('TenSEAL', ts.__version__)"
 ```
 
-### Jak uruchamiać skrypty z venv
+**IDE:** interpreter z `.venv\Scripts\python.exe`. W repozytorium są ustawienia VS Code / Cursor (`.vscode/`).
 
-Dwie równoważne opcje:
+### Dodatkowe komendy uv
 
 ```powershell
-# Opcja A: bez aktywacji venv (uv samo wskazuje na .venv)
+uv add pakiet
+uv add --dev pakiet
+uv remove pakiet
+```
+
+Uruchamianie modułów:
+
+```powershell
 uv run python -m src.client.doctor --help
 uv run pytest -v
-uv run uvicorn src.server.app:app --reload
-
-# Opcja B: aktywuj venv (klasycznie)
-.\.venv\Scripts\Activate.ps1
-python -m src.client.doctor --help
+uv run uvicorn src.server.app:app --reload --port 8000
 ```
-
-### Test instalacji
-
-```powershell
-uv run python -c "import tenseal as ts; print('TenSEAL OK', ts.__version__)"
-```
-
-### VS Code / Cursor
-
-W VS Code (lub Cursorze) wybierz interpreter: `Ctrl+Shift+P` → „Python: Select
-Interpreter" → wskaż `.venv\Scripts\python.exe`. Od tego momentu testy, debug i
-notebooki działają natywnie. W `.vscode/settings.json` i `.vscode/launch.json`
-dorzucamy gotową konfigurację, więc po otwarciu folderu nie musisz nic robić.
 
 ---
 
 ## Szybki start
 
-### 1) Wygeneruj/przygotuj dane
+### 1) Dane (`patients.csv`)
 
-Próbka Synthei jest mała (~100 pacjentów). Skrypt poniżej zapyta o ścieżkę i
-zbuduje `data/processed/patients.csv` z dodanym PESEL-em:
+**Opcja A — eksport Synthea (CSV):**
 
 ```powershell
 uv run python -m src.data.preprocess --synthea-dir data\synthea_raw --out data\processed\patients.csv
 ```
 
-(Jeśli nie masz Synthei: użyj `--fake N` aby wygenerować N syntetycznych
-pacjentów z naszego generatora — przyda się do benchmarków na 100 000 osobach,
-których Synthea by długo robiła.)
+**Opcja B — syntetyczna kohorta (szybkie demo / duże N):**
 
-### 2) Uruchom serwer
+```powershell
+uv run python -m src.data.preprocess --fake 2000 --out data\processed\patients.csv
+```
+
+### 2) Serwer API
 
 ```powershell
 uv run uvicorn src.server.app:app --reload --port 8000
 ```
 
-### 3) Uruchom klienta (lekarza)
-
-W drugim terminalu:
+### 3) Klient
 
 ```powershell
-# Serwer musi działać (patrz wyżej). Bez --server = tryb lokalny (bez HTTP).
-uv run python -m src.client.doctor --csv data\processed\patients.csv --column systolic_bp --server http://localhost:8000
+# HTTP (serwer z kroku 2)
+uv run python -m src.client.doctor --csv data\processed\patients.csv --column systolic_bp --server http://127.0.0.1:8000
 
-# Korelacja Pearsona (dwie kolumny, wiersze z NaN są odrzucane parami):
+# Ten sam pipeline bez sieci (logika HE w procesie)
+uv run python -m src.client.doctor --csv data\processed\patients.csv --column systolic_bp --local
+
+# Dwie kolumny → korelacja Pearsona
 uv run python -m src.client.doctor --csv data\processed\patients.csv --column systolic_bp --column2 diastolic_bp --stat correlation --local
 ```
 
-Otrzymasz:
-
-```
-== Średnia ciśnienia skurczowego ==
-  HE:        127.634218
-  plaintext: 127.634215
-  błąd rel.: 2.3e-08
-  czas HE:   312.4 ms   (szyfr: 41ms, eval: 256ms, dec: 15ms)
-  czas plain: 0.18 ms
-```
-
-### 4) Benchmarki
+### 4) Benchmarki (opcjonalnie)
 
 ```powershell
 uv run python -m src.bench.bench_correctness
-uv run python -m src.bench.bench_time --sizes 100 1000 10000 100000
+uv run python -m src.bench.bench_time --sizes 100 1000 10000
 uv run python -m src.bench.plots
 ```
 
-Wykresy i CSV trafiają do `src/bench/results/` (folder jest w `.gitignore` poza `.gitkeep`).
+Wyniki domyślnie w `src/bench/results/` (katalog jest ignorowany przez git poza `.gitkeep`).
 
-### 5) Demo w Jupyter (opcjonalnie)
+### 5) Notebooki (opcjonalnie)
+
+Nie są wymagane do działania systemu — patrz [`notebooks/README.md`](notebooks/README.md).
 
 ```powershell
 uv run jupyter lab
-# np. notebooks/01_intro_HE_CKKS.ipynb
 ```
 
 ---
 
-## Struktura repo
+## Struktura repozytorium
 
-```
+```text
 medical-he-stats/
-├── README.md                       ← jesteś tu
-├── pyproject.toml                  ← zależności (uv / pip)
+├── README.md
+├── pyproject.toml
 ├── uv.lock
-├── data/
-│   ├── synthea_raw/                ← surowe CSV z Synthei
-│   └── processed/                  ← patients.csv z PESEL
+├── data/                      # generowane lokalnie; .gitignore tam gdzie trzeba
 ├── src/
-│   ├── data/
-│   │   ├── pesel.py                ← generator PESEL z cyfrą kontrolną
-│   │   ├── preprocess.py           ← Synthea → patients.csv
-│   │   └── synthetic.py            ← własny generator (gdy brak Synthei)
-│   ├── crypto/
-│   │   ├── context.py              ← parametry CKKS, kontekst
-│   │   ├── keys.py                 ← zapis/odczyt kluczy
-│   │   └── codec.py                ← serializacja ciphertextów
-│   ├── plaintext/
-│   │   └── stats_plain.py          ← NumPy: oracle do porównań
-│   ├── server/
-│   │   ├── app.py                  ← FastAPI
-│   │   └── stats_he.py             ← obliczenia w HE
-│   ├── client/
-│   │   └── doctor.py               ← klient szpitala (e2e)
-│   └── bench/
-│       ├── bench_correctness.py
-│       ├── bench_time.py
-│       └── plots.py
-├── notebooks/
-│   ├── 01_intro_HE_CKKS.ipynb      ← tutorial CKKS (Hello HE)
-│   ├── 02_stats_demo.ipynb         ← demo end-to-end na danych
-│   └── 03_benchmarks.ipynb        ← benchmarki czasu / poprawności + wykresy
+│   ├── data/                  # preprocess, PESEL, generator syntetyczny
+│   ├── crypto/                # CKKS context, serializacja kolumn (chunking)
+│   ├── plaintext/             # referencja NumPy (oracle)
+│   ├── server/                # FastAPI + statystyki HE
+│   ├── client/                # klient CLI
+│   └── bench/                 # poprawność, czas, wykresy
+├── notebooks/                 # opcjonalne narracyjne demo — README w środku
 ├── tests/
-│   ├── test_pesel.py
-│   ├── test_stats_he.py
-│   └── test_e2e.py
-└── docs/
-    ├── theory.md                   ← teoria HE/CKKS
-    ├── architecture.md             ← architektura
-    └── threat_model.md             ← model zagrożeń
+└── docs/                      # teoria, architektura, model zagrożeń
 ```
 
 ---
 
-## Co dalej w nauce
+## Dokumentacja
 
-Kolejność, w której grupa powinna to czytać/robić:
+| Plik | Zawartość |
+|------|-----------|
+| [`docs/theory.md`](docs/theory.md) | CKKS, parametry, batching, dlaczego mediana przez histogram |
+| [`docs/architecture.md`](docs/architecture.md) | Endpointy, format przesyłki, kontekst bez `secret_key` |
+| [`docs/threat_model.md`](docs/threat_model.md) | Zakres ochrony HE, side channels |
 
-1. [`docs/theory.md`](docs/theory.md) — przeczytajcie pierwszy raz przed
-   jakimkolwiek kodem. Zwróćcie uwagę na sekcje: „dlaczego CKKS", „noise
-   budget", „batching".
-2. `notebooks/01_intro_HE_CKKS.ipynb` — odpalcie linijka po linijce, każdy z
-   Was sam. To Wasz „Hello World" w HE.
-3. `src/plaintext/stats_plain.py` — najprostszy plik. Zaczyna się od niego, żeby
-   każda statystyka miała swój „oracle".
-4. `src/crypto/context.py` + `src/server/stats_he.py` — serce projektu.
-   Porównujcie linia w linię z odpowiednikiem plain — zobaczcie, ile rzeczy jest
-   identycznych pojęciowo.
-5. `notebooks/02_stats_demo.ipynb` — demo na `patients.csv`.
-6. `notebooks/03_benchmarks.ipynb` — benchmarki i wykresy do slajdów.
-7. `src/bench/*` — te same skrypty z linii poleceń.
+Sugerowana kolejność przy pierwszym czytaniu kodu: `plaintext/stats_plain.py` → `crypto/context.py` → `server/stats_he.py` → `server/app.py` → `client/doctor.py`.
 
 ---
 
-## Podział pracy w grupie
+## Dane i odpowiedzialność
 
-W tym repo jest komentarzowy nagłówek `# OWNER:` przy plikach, które najlepiej
-przypisać konkretnym osobom. Sugerowany podział (3 osoby):
+W repozytorium **nie ma** realnych danych pacjentów. Obsługiwane są wyłącznie **zestawy syntetyczne** (własny generator lub pipeline Synthea). **PESEL** w CSV jest generowany algorytmicznie do celów demonstracyjnych — nie mapuje się na realne osoby.
 
-- **Osoba 1 — „Dane & PESEL"**: `src/data/*`, część raportu o danych
-  medycznych, generator PESEL, część testów.
-- **Osoba 2 — „Krypto & klient"**: `src/crypto/*`, `src/client/doctor.py`,
-  notebook 01 (intro do HE), część raportu o teorii HE.
-- **Osoba 3 — „Serwer & benchmark"**: `src/server/*`, `src/bench/*`, notebook
-  03, część raportu o wynikach i modelu zagrożeń.
-
-Wspólnie: notebook 02 (demo), prezentacja, raport końcowy.
-
----
-
-## Licencja i kontekst
-
-Projekt edukacyjny (zaliczeniowy). Dane Synthei są w 100% syntetyczne. Nasz
-generator PESEL nie używa danych żadnej żyjącej osoby — sprawdzane testami
-poprawności algorytmu, **nie** unikalności w rejestrze państwowym.
+Projekt traktuj jako **referencyjną implementację badawczo‑inżynierską** (proof of concept), nie jako gotowy produkt medyczny certyfikowany (brak m.in. pełnego hardeningu operacyjnego, HSM, SLA).
