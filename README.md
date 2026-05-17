@@ -1,4 +1,4 @@
-# medical-he-stats — poufna agregacja statystyk medycznych (homomorphic encryption)
+# Medical_HE — poufna agregacja statystyk medycznych (homomorphic encryption)
 
 **Outsourcing obliczeń statystycznych na niezaufany serwer bez ujawniania wartości pomiarów.**  
 Klient (szpital) szyfruje kolumny danych schematem **CKKS** (biblioteka **TenSEAL**), przesyła szyfrogramy przez **REST API** (**FastAPI**); serwer wykonuje obliczenia na zaszyfrowanych wektorach i zwraca wynik nadal zaszyfrowany — odszyfrowanie tylko po stronie posiadacza klucza prywatnego.
