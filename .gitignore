@@ -16,7 +16,6 @@ venv/
 keys/
 src/bench/results/*
 !src/bench/results/.gitkeep
-notebooks/.ipynb_checkpoints/
 
 # Dane medyczne (nawet jeśli syntetyczne, dla nawyku)
 data/synthea_raw/

@@ -13,7 +13,6 @@ Klient (szpital) szyfruje kolumny danych schematem **CKKS** (biblioteka **TenSEA
 | **Co robi system** | Statystyki na zaszyfrowanych seriach: suma, średnia, wariancja, histogram (zliczenia bucketów), korelacja Pearsona (komponenty HE → wartość końcowa po stronie klienta); mediana **przybliżona** przez histogram (świadomy kompromis kosztu HE — opisany w `docs/theory.md`). |
 | **Jakość** | Testy automatyczne: zgodność HE vs „oracle” NumPy, scenariusze HTTP end-to-end (`tests/`). |
 | **Wydajność** | Skrypty `src/bench/*` — czas szyfrowania / ewaluacji / plaintext, wykresy opcjonalnie w `src/bench/results/` (generowane lokalnie). |
-| **Kod vs notebooki** | Logika jest w **`src/`** i **`tests/`**. Katalog **`notebooks/`** jest opcjonalny — patrz [`notebooks/README.md`](notebooks/README.md). |
 
 ---
 
@@ -144,14 +143,6 @@ uv run python -m src.bench.plots
 
 Wyniki domyślnie w `src/bench/results/` (katalog jest ignorowany przez git poza `.gitkeep`).
 
-### 5) Notebooki (opcjonalnie)
-
-Nie są wymagane do działania systemu — patrz [`notebooks/README.md`](notebooks/README.md).
-
-```powershell
-uv run jupyter lab
-```
-
 ---
 
 ## Struktura repozytorium
@@ -169,7 +160,6 @@ medical-he-stats/
 │   ├── server/                # FastAPI + statystyki HE
 │   ├── client/                # klient CLI
 │   └── bench/                 # poprawność, czas, wykresy
-├── notebooks/                 # opcjonalne narracyjne demo — README w środku
 ├── tests/
 └── docs/                      # teoria, architektura, model zagrożeń
 ```
