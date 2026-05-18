@@ -1,7 +1,4 @@
 # Teoria szyfrowania homomorficznego 
-> Cel: każdy z trójki ma po przeczytaniu tego dokumentu rozumieć **dlaczego**
-> używamy CKKS, **co to** jest „noise budget" i **dlaczego** mediana jest droga.
-> Format: minimum matematyki konieczne do projektu, plus intuicja.
 
 ---
 
