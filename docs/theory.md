@@ -36,24 +36,6 @@ wejściach. A statystyki to wielomiany:
 
 ---
 
-## 2. Krótka historia (5 minut, do prezentacji)
-
-| Rok  | Co  | Dlaczego ważne |
-|------|-----|----------------|
-| 1978 | RSA jest „częściowo homomorficzny" (mnożenie) | Pierwszy znany schemat z homomorfizmem |
-| 1985 | ElGamal — mnożenie | Lepsza losowość |
-| 1999 | Paillier — dodawanie | Używany do dziś w głosowaniach elektronicznych |
-| **2009** | **Gentry** — pierwszy schemat **FHE** (lattice + bootstrapping) | Otworzyło dziedzinę |
-| 2011 | BGV (Brakerski-Gentry-Vaikuntanathan) | "Levelled" — bez bootstrappingu |
-| 2012 | BFV (Brakerski/Fan-Vercauteren) | Liczby całkowite mod $t$ |
-| **2017** | **CKKS** (Cheon-Kim-Kim-Song) | **Liczby rzeczywiste (przybliżone)** — to nasz wybór |
-| 2016 | TFHE / FHEW | Operacje na bitach, szybkie porównania |
-
-**Główne biblioteki:** Microsoft SEAL, HElib, OpenFHE (dawn. PALISADE), Lattigo
-(Go), TFHE-rs (Zama, Rust). **TenSEAL** to wrapper Pythonowy na SEAL.
-
----
-
 ## 3. Klasyfikacja schematów
 
 ```text
